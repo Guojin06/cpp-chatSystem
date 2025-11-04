@@ -29,6 +29,9 @@ public:
     // 获取读缓冲区（业务层读取数据用）
     const std::string& GetReadBuf() const { return readBuf_; }
     
+    // 清空读缓冲区
+    void ClearReadBuf() { readBuf_.clear(); }
+    
 private:
     // 内部方法（给Channel回调用）
     void HandleRead();    // fd可读
