@@ -71,7 +71,7 @@ void TcpConnection::Send(const std::string& msg) {
     // 大部分情况下socket缓冲区是空的，可以立即发送，不用等EPOLLOUT事件
     if (writeBuf_.empty()) {
         // 尝试直接发送
-        int n = send(fd_, msg.data(), msg.size(), 0);
+        int n = send(fd_, msg.data(), msg.size(), 0);//msg.data()是字符串的指针，msg.size()是字符串的长度
         
         if (n >= 0) {
             // 发送成功
@@ -175,7 +175,7 @@ void TcpConnection::HandleError() {
     // 打印错误信息
     int err;
     socklen_t len = sizeof(err);
-    getsockopt(fd_, SOL_SOCKET, SO_ERROR, &err, &len);
+    getsockopt(fd_, SOL_SOCKET, SO_ERROR, &err, &len);//getsockopt是获取socket的错误信息
     printf("TcpConnection error: %s\n", strerror(err));
     
     // 关闭连接
