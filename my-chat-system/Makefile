@@ -4,7 +4,7 @@ BUILD_DIR = build
 TEST_DIR = test
 
 # 目标文件
-OBJS = $(BUILD_DIR)/Channel.o $(BUILD_DIR)/EventLoop.o
+OBJS = $(BUILD_DIR)/Channel.o $(BUILD_DIR)/EventLoop.o $(BUILD_DIR)/TcpConnection.o
 
 all: $(BUILD_DIR) $(OBJS) test_channel
 
@@ -19,6 +19,10 @@ $(BUILD_DIR)/Channel.o: src/Channel.cpp src/Channel.h
 # 编译EventLoop.o
 $(BUILD_DIR)/EventLoop.o: src/EventLoop.cpp src/EventLoop.h src/Channel.h
 	$(CXX) $(CXXFLAGS) -c src/EventLoop.cpp -o $(BUILD_DIR)/EventLoop.o
+
+# 编译TcpConnection.o
+$(BUILD_DIR)/TcpConnection.o: src/TcpConnection.cpp src/TcpConnection.h src/EventLoop.h src/Channel.h
+	$(CXX) $(CXXFLAGS) -c src/TcpConnection.cpp -o $(BUILD_DIR)/TcpConnection.o
 
 # 测试Channel
 test_channel: $(OBJS) $(TEST_DIR)/test_channel.cpp
