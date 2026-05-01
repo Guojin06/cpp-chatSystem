@@ -1,0 +1,12 @@
+{
+  "meter_id": "000000000001",
+  "status": "ok",
+  "timestamp": "2026-04-20 20:08:41",
+  "data": {
+    "voltage": 22.2,
+    "current": 0.12,
+    "active_energy": 10.55,
+    "power_factor": 0.85
+  },
+  "raw_frame": "68 01 00 00 00 00 00 68 91 0A 33 33 34 35 55 35 45 33 88 43 08 16"
+}

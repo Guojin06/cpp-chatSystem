@@ -1,0 +1,9 @@
+{
+  "meter_id": "000000000001",
+  "poll_interval_sec": 10,
+  "serial_port": "/tmp/vserial1",
+  "data_items": ["voltage", "current", "active_energy"],
+  "mqtt_topic": "dtu/meter/000000000001",
+  "http_port": 8000,
+  "latest_data_path": "../api-server/data/latest.json"
+}
