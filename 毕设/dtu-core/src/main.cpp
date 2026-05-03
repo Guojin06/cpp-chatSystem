@@ -124,6 +124,64 @@ std::string parseSerialPort(const std::string& json) {
 
 } // namespace
 
+// ==================== 重传逻辑辅助函数 ====================
+
+// 将 MeterRecord 转换为 JSON 字符串（与 MQTT 发布格式一致）
+std::string recordToJson(const MeterRecord& r) {
+    std::string json = "{";
+    json += "\"meter_id\":\"" + r.meterId + "\",";
+    json += "\"timestamp\":\"" + r.timestamp + "\",";
+    json += "\"voltage\":" + std::to_string(r.voltage) + ",";
+    json += "\"current\":" + std::to_string(r.current) + ",";
+    json += "\"active_energy\":" + std::to_string(r.activeEnergy) + ",";
+    json += "\"power_factor\":" + std::to_string(r.powerFactor);
+    json += "}";
+    return json;
+}
+
+// 尝试重传数据库中未上传的记录
+// 返回值：本次成功上传的记录数量
+int tryResendPendingRecords(DbHandler& db, MqttClient& mqtt) {
+    // 1. 从数据库查出所有 uploaded=0 的记录（即之前发布失败的）
+    auto pending = db.queryUnuploaded(100);  // 每次最多处理100条
+    if (pending.empty()) {
+        return 0;
+    }
+
+    std::cout << "[重传] 发现 " << pending.size() << " 条待重传记录" << std::endl;
+
+    int successCount = 0;
+    std::vector<int64_t> successIds;  // 收集成功上传的记录ID
+
+    for (const auto& record : pending) {
+        std::string topic = "dtu/meter/" + record.meterId;
+        std::string payload = recordToJson(record);
+
+        // 2. 尝试重新发布到 MQTT
+        if (mqtt.publish(topic, payload, 0)) {
+            successIds.push_back(record.id);
+            successCount++;
+            std::cout << "[重传] 成功: id=" << record.id
+                      << " meter=" << record.meterId
+                      << " ts=" << record.timestamp << std::endl;
+        } else {
+            // 3. 发布失败，累加重试次数
+            db.markUploadFailed(record.id);
+            std::cerr << "[重传] 失败: id=" << record.id << std::endl;
+        }
+    }
+
+    // 4. 批量标记成功的记录为已上传
+    if (!successIds.empty()) {
+        db.markUploaded(successIds);
+        std::cout << "[重传] 本轮成功上传 " << successCount << " 条" << std::endl;
+    }
+
+    return successCount;
+}
+
+// ==================== 主程序 ====================
+
 int main() {
     // 读取配置文件
     std::string configStr = readFile("../config/config.json");
@@ -166,6 +224,11 @@ int main() {
     }
 
     DLT645Parser parser;
+
+    // ==================== 重传相关状态初始化 ====================
+    const int RESEND_INTERVAL_SEC = 60;      // 每60秒尝试重传一次
+    int elapsedSinceResend = 0;               // 距离上次重传的已过秒数
+    auto lastTick = std::chrono::steady_clock::now();  // 上次 tick 的时间点
 
     while (true) {
         // 第1步：获取一帧数据
@@ -234,8 +297,22 @@ int main() {
             if (mqtt.publish(mqtt_topic, mqtt_payload, 0)) {
                 std::cout << "[MQTT] 已发布到: " << mqtt_topic << std::endl;
             } else {
-                std::cerr << "[MQTT] 发布失败" << std::endl;
+                std::cerr << "[MQTT] 发布失败，存入本地待重传" << std::endl;
             }
+        }
+
+        // ==================== 重传检查 ====================
+        // 计算本轮采集消耗的时间
+        auto now = std::chrono::steady_clock::now();
+        int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastTick).count();
+        lastTick = now;
+        elapsedSinceResend += elapsed;
+
+        // 每隔 RESEND_INTERVAL_SEC 秒，执行一次重传
+        if (elapsedSinceResend >= RESEND_INTERVAL_SEC && mqttConnected) {
+            std::cout << "===== 触发定时重传 =====" << std::endl;
+            tryResendPendingRecords(db, mqtt);
+            elapsedSinceResend = 0;  // 重置计数器
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(pollInterval));

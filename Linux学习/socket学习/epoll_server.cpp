@@ -6,9 +6,16 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>  // 用于设置非阻塞
 
 #define MAX_EVENTS 10
 #define PORT 8080
+
+// 设置socket为非阻塞（ET模式需要）
+void set_nonblocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
 
 int main() {
     // TODO 1: 创建listen socket（和Day1一样）
@@ -82,8 +89,10 @@ int main() {
     //   epoll_ctl(epfd, EPOLL_CTL_ADD, listen_sock, &ev);
     
     struct epoll_event ev;
-    ev.events = EPOLLIN;//设置事件类型为可读事件，为什么是EPOLLIN？因为我们要监听listen_sock的读事件，当有数据可读时，epoll_wait会返回该fd
-    //客户端发消息时触发EPOLLIN事件，epoll_wait会返回该fd，然后我们再通过该fd找到对应的客户端，然后读取客户端发送的数据
+    ev.events = EPOLLIN | EPOLLET;//【修改】设置为边缘触发模式（ET）
+    //EPOLLIN：可读事件
+    //EPOLLET：边缘触发（Edge Triggered），只在状态变化时通知一次
+    //对比：LT（水平触发）会在缓冲区有数据时一直通知
     ev.data.fd = listen_sock;//用户数据为listen_sock，用于epoll_wait返回时，找到对应的fd
     epoll_ctl(epfd, EPOLL_CTL_ADD, listen_sock, &ev);//将listen_sock加入epoll监听
     //参数
@@ -134,51 +143,67 @@ int main() {
                     perror("accept");
                     continue;
                 }
+                
+                set_nonblocking(client);  // ET模式必须：设置为非阻塞
+                
                 printf("新客户端连接，文件描述符：%d\n", client);//新客户端连接
                 //把新客户端加入epoll监听
                 struct epoll_event ev;
-                ev.events = EPOLLIN;
+                ev.events = EPOLLIN | EPOLLET;//【修改】客户端也用边缘触发
                 ev.data.fd = client;
                 epoll_ctl(epfd, EPOLL_CTL_ADD, client, &ev);//将新客户端加入epoll监听
 
             } else {
                 // TODO 9: 某个客户端有数据
+                // ET模式必须：循环读取直到EAGAIN（把内核缓冲区数据全部读完）
                 char buf[1024];
-                // 提示：
-                //   1. int len = recv(fd, buf, sizeof(buf)-1, 0);
-                //   2. 如果len <= 0，说明客户端断开：
-                //      - printf("Client disconnected: fd=%d\n", fd);
-                //      - epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
-                //      - close(fd);
-                //   3. 否则，echo回去：
-                //      - buf[len] = '\0';
-                //      - printf("Received from fd=%d: %s\n", fd, buf);
-                //      - send(fd, buf, len, 0);
-
-                int len = recv(fd, buf, sizeof(buf)-1, 0);//len表示接收的字节数
-                //参数
-                //fd：客户端socket文件描述符
-                //buf：缓冲区，用于存储接收的数据
-                //sizeof(buf)-1：缓冲区大小，-1表示不包括结尾的'\0'
-                //0：标志位，0表示阻塞模式
-                //返回值：成功返回接收的字节数，失败返回-1
-                //失败原因：errno
-                //成功原因：recv成功
-                if (len <= 0) {
-                    printf("客户端断开连接，文件描述符：%d\n", fd);//客户端断开连接
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);//将客户端从epoll监听中删除
-                    close(fd);//关闭客户端socket文件描述符
-                    continue;
+                
+                while (1) {  // 循环读取
+                    int len = recv(fd, buf, sizeof(buf)-1, 0);//len表示接收的字节数
+                    //参数
+                    //fd：客户端socket文件描述符
+                    //buf：缓冲区，用于存储接收的数据
+                    //sizeof(buf)-1：缓冲区大小，-1表示不包括结尾的'\0'
+                    //0：标志位，0表示阻塞模式（但我们设置了socket为非阻塞，所以不会阻塞）
+                    //返回值：成功返回接收的字节数，失败返回-1
+                    //失败原因：errno
+                    //成功原因：recv成功
+                    
+                    if (len > 0) {
+                        // 读到数据，echo回去
+                        buf[len] = '\0';//字符串结尾
+                        printf("收到 %d 字节，fd=%d\n", len, fd);
+                        send(fd, buf, len, 0);//发送消息给客户端
+                        //参数
+                        //fd：客户端socket文件描述符
+                        //buf：缓冲区，用于存储发送的数据
+                        //len：发送的字节数
+                        //0：标志位，0表示阻塞模式
+                        //返回值：成功返回发送的字节数，失败返回-1
+                        // 继续循环，读取剩余数据
+                        
+                    } else if (len == 0) {
+                        // len==0：对端关闭连接
+                        printf("客户端断开连接，文件描述符：%d\n", fd);//客户端断开连接
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);//将客户端从epoll监听中删除
+                        close(fd);//关闭客户端socket文件描述符
+                        break;
+                        
+                    } else {
+                        // len==-1：出错或数据读完
+                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                            // EAGAIN：数据读完了！（这是ET模式的正常情况）
+                            printf("数据读取完毕，fd=%d\n", fd);
+                            break;
+                        } else {
+                            // 真的出错了
+                            perror("recv error");
+                            epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
+                            close(fd);
+                            break;
+                        }
+                    }
                 }
-                buf[len] = '\0';//字符串结尾
-                printf("收到客户端消息，文件描述符：%d，消息：%s\n", fd, buf);//收到客户端消息
-                send(fd, buf, len, 0);//发送消息给客户端
-                //参数
-                //fd：客户端socket文件描述符
-                //buf：缓冲区，用于存储发送的数据
-                //len：发送的字节数
-                //0：标志位，0表示阻塞模式
-                //返回值：成功返回发送的字节数，失败返回-1
             }
         }
     }

@@ -52,22 +52,6 @@ export const mockMeterData = {
     reverseReactiveEnergy: 0,
     maxDemand: 0,
     maxDemandTime: '-'
-  },
-  'METER_003': {
-    deviceId: 'METER_003',
-    timestamp: '2025-01-05 12:00:00',
-    voltage: { A: 0, B: 0, C: 0 },
-    current: { A: 0, B: 0, C: 0 },
-    activePower: 0,
-    reactivePower: 0,
-    powerFactor: 0,
-    forwardActiveEnergy: 5230.8,
-    reverseActiveEnergy: 0,
-    forwardReactiveEnergy: 1080.5,
-    reverseReactiveEnergy: 0,
-    maxDemand: 0,
-    maxDemandTime: '-'
-  }
 }
 
 // 模拟数据自动更新

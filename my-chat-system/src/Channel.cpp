@@ -17,7 +17,10 @@ void Channel::HandleEvent() {
             errorCallback_();
         }
     }
-    
+    //关闭分两种情况：EPOLLHUP和EPOLLRDHUP
+    //EPOLLHUP：挂起
+    //EPOLLRDHUP：读半关闭
+    //EPOLLHUP | EPOLLRDHUP：挂起或读半关闭
     if (revents_ & (EPOLLHUP | EPOLLRDHUP)) {
         if (closeCallback_) {
             closeCallback_();
